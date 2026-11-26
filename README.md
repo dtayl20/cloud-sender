@@ -4,6 +4,8 @@ A self-hosted bulk email tool. React console, Hono API, D1 and Queues inside one
 Cloudflare Worker, with SMTP2GO handling delivery. Auth is Cloudflare Access —
 there is no app-level login to get wrong.
 
+![cloud-sender dashboard](docs/dashboard.png)
+
 **Start with [SETUP.md](SETUP.md)**: clone → Cloudflare resources → schema →
 
 Security model and reporting: [SECURITY.md](SECURITY.md).
