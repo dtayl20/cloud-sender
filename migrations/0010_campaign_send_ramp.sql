@@ -1,0 +1,37 @@
+-- 0010_campaign_send_ramp.sql - an optional ramp-up on a campaign's daily cap.
+--
+-- 0009 gave a campaign one flat daily_cap, so "send 300 on day one, then 500 a
+-- day" - how a cold sending domain should start - could not be expressed at
+-- all: day one had to be either the full cap or nothing.
+--
+-- This adds two more OPTIONAL, nullable columns:
+--   * ramp_start - the allowance on the campaign's FIRST sending day
+--                  (NULL = no ramp: the daily cap applies from day one).
+--   * ramp_days  - how many sending days until the full daily cap is reached
+--                  (e.g. 2 -> day 1 at ramp_start, day 2 onward at daily_cap).
+--
+-- The allowance for the k-th sending day (k = 1, 2, 3 ...) is the ramp_start
+-- growing evenly to daily_cap by day ramp_days:
+--
+--   round(ramp_start + (daily_cap - ramp_start) * (k - 1) / (ramp_days - 1))
+--   for k <  ramp_days
+--   daily_cap                                              for k >= ramp_days
+--
+-- The ramp is only a shape for the CAP, so it does nothing on its own: it needs
+-- a daily_cap to grow into, a ramp_start below that cap, and at least two
+-- sending days. ramp_start > daily_cap or ramp_days = 1 therefore falls back to
+-- no ramp (the flat cap from day one) rather than doing something surprising
+-- with the first day.
+--
+-- As with the rest of the plan, NOTHING here is stored as progress: which
+-- sending day the campaign is on is derived from the `sends` table (the distinct
+-- local days that actually have sends), so a re-entered cron tick, a reaped run
+-- or a pause/resume all land on the right step. Skipped weekends and days that
+-- sent nothing never consume a step.
+--
+-- Both columns are nullable and purely additive: every existing campaign keeps
+-- sending exactly as it does today, and a campaign with a cap but no ramp is
+-- byte-identical to the flat-cap behaviour 0009 introduced.
+
+ALTER TABLE campaigns ADD COLUMN ramp_start INTEGER;
+ALTER TABLE campaigns ADD COLUMN ramp_days INTEGER;

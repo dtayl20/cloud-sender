@@ -1,0 +1,96 @@
+# Cloudflare Worker config — bulk emailer
+name = "cloud-sender"
+main = "src/worker/index.ts"
+compatibility_date = "2024-12-30"
+compatibility_flags = ["nodejs_compat"]
+
+# Serve the Vite-built SPA from the Worker
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+# Primary D1 (app data)
+[[d1_databases]]
+binding = "DB"
+database_name = "emailer_db"
+database_id = "00000000-0000-0000-0000-000000000000"  # run: wrangler d1 create emailer_db  -> paste the id here
+migrations_dir = "migrations"
+
+# Optional: bind an existing contact source DB for imports. Uncomment and point
+# it at your own database. The binding NAME must stay SOURCE_DB.
+# [[d1_databases]]
+# binding = "SOURCE_DB"
+# database_name = "your_source_db"
+# database_id = "<your-source-d1-id>"
+
+# Queue producer binding
+[[queues.producers]]
+binding = "SEND_QUEUE"
+queue = "send-queue"
+
+# Queue consumer (same Worker handles both)
+[[queues.consumers]]
+queue = "send-queue"
+max_batch_size = 25
+max_batch_timeout = 5
+max_retries = 4
+max_concurrency = 4
+dead_letter_queue = "send-dlq"
+
+# Every minute: dispatch scheduled campaigns. The handler self-gates the
+# source-DB mirror sync to run once per hour (top of the hour).
+[triggers]
+crons = ["* * * * *"]
+
+# Non-sensitive defaults (plaintext, committed)
+[vars]
+DEFAULT_FROM_EMAIL = "listing@localdentists.au"
+DEFAULT_FROM_NAME = "LocalDentists.au"
+# Default IANA zone for daily-batch (drip) sending windows. A campaign may
+# override it in campaigns.send_timezone; an unset campaign follows this.
+SEND_TIMEZONE = "Australia/Brisbane"
+
+# Public website contact form (POST /api/contact). A form on
+# another origin posts cross-origin to this Worker; the recipient
+# below is fixed here and is never read from the request.
+CONTACT_TO_EMAIL = "you@example.com"
+CONTACT_FROM_NAME = "Website Contact Form"
+# Envelope sender for enquiries. Unset on purpose: it falls back to
+# DEFAULT_FROM_EMAIL, because a sender on an unverified domain is rejected by
+# SMTP2GO. Set this to a Peak address once example.com is a
+# verified sender domain in SMTP2GO.
+# CONTACT_FROM_EMAIL = "website@example.com"
+# Per-IP submission limit for /api/contact, within the window below.
+# Extra browser origins allowed to POST /api/contact (comma-separated, exact
+# origins with scheme). Keep deployment-specific hosts here as dashboard vars,
+# not in this file.
+# CONTACT_ALLOWED_ORIGINS = "https://your-site.com,https://www.your-site.com"
+# Any preview deployment matching this host suffix is also allowed.
+# CONTACT_PREVIEW_SUFFIX = ".your-project.pages.dev"
+CONTACT_RATE_LIMIT = "5"
+CONTACT_RATE_WINDOW_SECONDS = "600"
+
+# Clinic-report re-send (POST /api/webhooks/clinic-report), called by the GHL
+# workflow when a clinic asks for the report again. Sends through SMTP2GO as
+# LocalDentists.au so the mail carries no Dental Scout branding.
+REPORT_FROM_EMAIL = "reports@localdentists.au"
+REPORT_FROM_NAME = "LocalDentists.au"
+
+# GHL engagement write-back (webhooks.ts -> ghl.ts). On an SMTP2Go open/click
+# the handler mirrors the event onto the GHL contact as a tag + a note.
+# Non-sensitive defaults; GHL_API_KEY is a Worker secret (see below).
+GHL_API_BASE = "https://services.leadconnectorhq.com"
+GHL_LOCATION_ID = "4RCtnflQWYDE2whrQGyf"
+GHL_OPEN_TAG = "email_opened"
+GHL_CLICK_TAG = "email_clicked"
+
+# Sensitive values are Worker Secrets — set from your machine, do NOT commit:
+#   wrangler secret put SMTP2GO_API_KEY
+#   wrangler secret put WEBHOOK_TOKEN
+#   wrangler secret put IP_SALT              # salts the contact rate-limit IP hash
+#   wrangler secret put REPORT_SEND_TOKEN     # bearer for POST /api/webhooks/clinic-report
+#   wrangler secret put GHL_API_KEY            # GHL Private Integration token for the engagement write-back
+# Secrets are stored per Worker, not in this file, so a CI deploy keeps them; the
+# dashboard's "update your wrangler configuration" notice only matters for
+# plain-text vars, which a repo deploy WOULD overwrite.

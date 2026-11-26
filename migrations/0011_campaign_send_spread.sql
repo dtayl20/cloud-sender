@@ -1,0 +1,28 @@
+-- 0011_campaign_send_spread.sql - spread each day's batch across N minutes.
+--
+-- 0009/0010 decide HOW MUCH a day releases (the cap, and the ramp that climbs
+-- to it); at the window time the dispatcher released all of it at once and let
+-- the send queue pace the SMTP2GO calls. At a 500/day cap that leaves in one
+-- burst, which is exactly the shape that reads as bulk mail to a filter.
+--
+-- This adds one OPTIONAL, nullable column:
+--   * spread_minutes - minutes to spread each day's batch across
+--                      (NULL or 0 = the whole day's batch at the window, i.e.
+--                      today's behaviour; the UI default is 60).
+--
+-- The release is a leaky bucket, not a per-tick allowance:
+--
+--   due(now) = elapsed minutes since the window opened x (day allowance / spread)
+--
+-- and the dispatcher releases `due(now) - already released today`, clamped to
+-- the day's remaining allowance. Because `due` is a function of the CLOCK, a
+-- missed tick (a reaped harness, a slow run) releases only the slices elapsed
+-- time has earned - never a backlog of whole batches - and the day still totals
+-- its allowance by the end of the spread. It also never starts before the
+-- window opens, and it cannot exceed the cap or the ramp's step for that day.
+--
+-- Like the rest of the plan there is NO stored release marker: `already released
+-- today` is counted from the `sends` table on every tick, so re-entering a tick
+-- within the same minute releases nothing extra.
+
+ALTER TABLE campaigns ADD COLUMN spread_minutes INTEGER;
